@@ -47,7 +47,13 @@ Marimo better matches this project’s focus on experimentation:
 ## Environment Variables & API Keys
 
 * **Keep secrets in `.env`.** Place `OPENAI_API_KEY` (and other keys) in the `.env` beside `pyproject.toml`; marimo loads
-  this file automatically, and `marimo.toml` pins the runtime to it.
+  this file automatically, thanks to the runtime configuration:
+
+  ```toml
+  # pyproject.toml
+  [tool.marimo.runtime]
+  dotenv = [".env", ".env.testing"]
+  ```
 * **Example entry:**
 
   ```bash
