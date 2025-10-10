@@ -1,0 +1,14 @@
+[project]
+name = "cheat-at-search-october-cohort"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cheat-at-search",
+    "marimo>=0.16.5",
+    "watchdog>=6.0.0",
+]
+
+[tool.uv.sources]
+cheat-at-search = { git = "https://github.com/softwaredoug/cheat-at-search.git" }
