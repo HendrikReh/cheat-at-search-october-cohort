@@ -65,3 +65,8 @@ Marimo better matches this project’s focus on experimentation:
   extra exports, so the enrichers can authenticate.
 * **Multiple environments:** If you need `.env.testing` or similar, list them under `[tool.marimo.runtime] dotenv` in
   `pyproject.toml` to control which files load per configuration.
+    ```toml
+  # pyproject.toml
+  [tool.marimo.runtime]
+  dotenv = [".env", ".env.testing"]
+  ```
