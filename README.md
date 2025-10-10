@@ -57,6 +57,7 @@ Marimo better matches this project’s focus on experimentation:
 * **Example entry:**
 
   ```bash
+  # .env
   OPENAI_API_KEY=sk-your-api-key
   ```
 
