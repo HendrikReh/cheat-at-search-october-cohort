@@ -14,3 +14,6 @@ dependencies = [
 
 [tool.uv.sources]
 cheat-at-search = { git = "https://github.com/softwaredoug/cheat-at-search.git" }
+
+[tool.marimo.runtime]
+dotenv = [".env", ".env.testing"]
