@@ -52,7 +52,7 @@ Marimo better matches this project’s focus on experimentation:
   ```toml
   # pyproject.toml
   [tool.marimo.runtime]
-  dotenv = [".env", ".env.testing"]
+  dotenv = [".env"]
   ```
 * **Example entry:**
 
