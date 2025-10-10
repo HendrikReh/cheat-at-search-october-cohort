@@ -107,6 +107,8 @@ source = { virtual = "." }
 dependencies = [
     { name = "cheat-at-search" },
     { name = "marimo" },
+    { name = "pystemmer" },
+    { name = "searcharray" },
     { name = "watchdog" },
 ]
 
@@ -114,6 +116,8 @@ dependencies = [
 requires-dist = [
     { name = "cheat-at-search", git = "https://github.com/softwaredoug/cheat-at-search.git" },
     { name = "marimo", specifier = ">=0.16.5" },
+    { name = "pystemmer", specifier = ">=3.0.0" },
+    { name = "searcharray", specifier = ">=0.0.72" },
     { name = "watchdog", specifier = ">=6.0.0" },
 ]
 
