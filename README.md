@@ -4,7 +4,7 @@ Companion repo for my experiments following [Doug Turnbull](https://www.linkedin
 [*Cheat at Search with LLMs*](https://maven.com/softwaredoug/cheat-at-search) (Maven) on building LLM‑based
 query and content understanding.
 
-## Why I Am Using [marimo](https://marimo.io) Instead of Jupyter
+## Why I Am Using [marimo](https://marimo.io) Instead Of Jupyter
 
 Marimo better matches this project’s focus on experimentation:
 
@@ -43,3 +43,18 @@ Marimo better matches this project’s focus on experimentation:
 * **More background:** From the [launch announcement](https://marimo.io/blog/announcing-molab): MoLab emphasizes
   reproducibility (single‑definition rule, no hidden state), integrates with git‑based workflows, and supports sharing
   read‑only views or copyable notebooks via secure links.
+
+## Environment Variables & API Keys
+
+* **Keep secrets in `.env`.** Place `OPENAI_API_KEY` (and other keys) in the `.env` beside `pyproject.toml`; marimo loads
+  this file automatically, and `marimo.toml` pins the runtime to it.
+* **Example entry:**
+
+  ```bash
+  OPENAI_API_KEY=sk-your-api-key
+  ```
+
+* **Running notebooks:** Commands such as `uv run marimo run notebooks/synonyms_from_llms.py` pick up the key with no
+  extra exports, so the enrichers can authenticate.
+* **Multiple environments:** If you need `.env.testing` or similar, list them under `[tool.marimo.runtime] dotenv` in
+  `pyproject.toml` to control which files load per configuration.
