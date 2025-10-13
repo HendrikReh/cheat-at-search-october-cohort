@@ -8,9 +8,15 @@ app = marimo.App()
 def _(mo):
     mo.md(
         r"""
-    # Compute BM25 baseline and view NDCG
+    # Analyze BM25 baseline on WANDS
 
-    This notebook just does a basic analysis of poor performing queries with a BM25 baseline against the WANDS (Wayfair Annotated Dataset) search query dataset
+    This notebook builds a plain BM25 searcher so we have a reproducible baseline on the WANDS (Wayfair Annotated Dataset for Search) relevance judgments. We will:
+
+    - tokenize the product catalog with a Snowball stemmer and wire a minimal search strategy,
+    - score every labeled query so we can measure ranking quality with NDCG, and
+    - inspect poor performing queries to understand where lexical relevance breaks down.
+
+    Keep this run as the control group for later experiments that add structure or LLM powered signals.
     """
     )
     return
@@ -26,12 +32,13 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    ### Introducing our baseline search strategy
+    ### Baseline BM25 search strategy
 
-    Here is a very basic search strategy that executes a naive BM25 search. Notice
+    The next cells define a `SearchStrategy` subclass that mirrors how a production lexical ranker might behave, but without any learned weights. Key pieces to notice:
 
-    * In the constructor we initialize some weights (name and body weights)
-    * In `search` we search each field, summing scores as we go
+    - The constructor caches the boosts applied to product name and description fields and builds Snowball-tokenized `SearchArray` indices for both.
+    - `search` tokenizes the incoming query, computes BM25 scores for each token across the indexed fields, and sums the results into a single score per product.
+    - Apart from printing debug info, no reranking or filters are applied. This gives us a clean reference point for later improvements.
     """
     )
     return
@@ -143,9 +150,13 @@ def _(graded_bm25):
 def _(mo):
     mo.md(
         r"""
-    ## Shortcuts (saved baseline, etc)
+    ## Reusable evaluation helpers
 
-    Helpers to compute ndcg of each query and other comparison functions
+    The following cells keep computed results and metric helpers in memory so we do not have to rerun the entire pipeline every time we poke at the data. Expect to see:
+
+    - the graded BM25 dataframe reused for quick aggregations,
+    - utility functions (`ndcgs`, `ndcg_delta`, `vs_ideal`) that let us slice performance by query, and
+    - lightweight dataframe peeks that surface the worst ranking failures.
     """
     )
     return
@@ -159,7 +170,13 @@ def _(graded_bm25):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### View random Queries in WANDS dataset with BM25""")
+    mo.md(
+        r"""
+    ### Explore low-NDCG queries
+
+    Sorting queries by NDCG highlights the long tail where plain BM25 underperforms. The next cell surfaces the bottom performers so we can dig into whether the issue stems from vocabulary mismatch, missing attributes, or annotation noise.
+    """
+    )
     return
 
 
@@ -177,7 +194,13 @@ def _(graded_bm25, ndcgs):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### View random Queries in WANDS dataset with BM25""")
+    mo.md(
+        r"""
+    ### Sample another slice
+
+    Rerunning the sort is handy when we tweak the strategy or adjust filters; it confirms the problem queries stay consistent. Feel free to re-execute this block after experimental changes to monitor drift.
+    """
+    )
     return
 
 
@@ -189,7 +212,13 @@ def _(graded_bm25, ndcgs):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### Compare BM25 vs the 'ideal' search results""")
+    mo.md(
+        r"""
+    ### Compare BM25 with ideal rankings
+
+    The `vs_ideal` helper pairs each query with the assessor-graded ideal ordering so we can inspect mismatches item by item. By picking a few representative queries we can trace why BM25 promotes the wrong products and capture concrete examples for later writeups.
+    """
+    )
     return
 
 

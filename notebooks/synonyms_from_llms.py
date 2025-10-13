@@ -8,17 +8,22 @@ app = marimo.App()
 def _(mo):
     mo.md(
         r"""
-    # Synonyms generation with an LLM
+    # Generate query synonyms with an LLM
 
     <small>
     (from <a href="http://maven.com/softwaredoug/cheat-at-search">Cheat at Search with LLMs</a> training course by Doug Turnbull.)
     </small>
 
-    Let's get familiar with the code we'll use for this class by doing what a lot of search teams did when they heard about LLMs
+    Many search teams experimented with large language models by asking a simple question: can a model invent synonyms that make lexical search better? This notebook recreates that experiment end to end so we can measure the trade offs ourselves.
 
-    * Can I generate synonyms using LLMs?
+    The flow we follow:
 
-    We'll try to expand queries -> their synonyms and see if it helps NDCG
+    - load the baseline BM25 results for the WANDS dataset,
+    - call an LLM to generate synonym phrases for each shopper query,
+    - inject those phrases into a lightweight lexical strategy, and
+    - compare ranking quality (NDCG) against the original BM25 run.
+
+    Treat this as a tour through the infrastructure we will reuse in later lessons: structured LLM calls, SearchArray indexing, and evaluation helpers.
     """
     )
     return
@@ -36,13 +41,15 @@ def _(mo):
         r"""
     ## Import helpers
 
-    Import the following helpers:
+    We lean on utility functions from `cheat_at_search.search` throughout the notebook:
 
-    * `run_strategy` -- this runs a "strategy" and gives us the search results for each query back (more on this in a second)
-    * `graded_bm25` -- a BM25 search baseline. A dump of the search results of every test query in the Wayfair dataset run using a BM25 baseline. Useful to compare our attempts against.
-    * `ndcgs` -- Take one of the sets of search results (ie `graded_bm25`) and get the NDCG of each query
-    * `ndcg_delta` -- Compare two sets of search results (ie `graded_bm25` vs `graded_my_cool_experiment`) and see which queries do better / worse
-    * `vs_ideal` -- Take a set of search results (ie `graded_bm25`) and compare against the ideal according to the ground truth data.
+    - `run_strategy` executes a search strategy against every WANDS query and returns graded results.
+    - `graded_bm25` is the cached baseline run that we will compare against.
+    - `ndcgs` computes per-query NDCG so we can summarize performance.
+    - `ndcg_delta` highlights wins and losses between two result sets.
+    - `vs_ideal` aligns any result set against the human graded ideal ordering.
+
+    Keeping these helpers in one place keeps the rest of the notebook focused on how synonyms alter ranking, not on boilerplate evaluation code.
     """
     )
     return
@@ -60,9 +67,9 @@ def _(mo):
         r"""
     ## Import WANDS data
 
-    Import [Wayfair Annotated Dataset](https://github.com/wayfair/WANDS) a labeled furniture e-commerce dataset. This is a helpful dataset that has 480 e-commerce queries, along with ~45K furniture / home goods products, and relevance labels for each. In WANDS relevance labels range from 0 (not at all relevant) to 2 (relevant)
+    The [Wayfair Annotated Dataset](https://github.com/wayfair/WANDS) (WANDS) pairs 480 real furniture queries with roughly 45k products and human relevance grades. Scores range from 0 (not relevant) to 2 (exact fit). We treat this dataset as our regression test bench: every strategy we build runs against the same queries so we can compare apples to apples.
 
-    Below you see a sample of the corpus as a pandas dataframe.
+    The next cell simply loads the product catalog into a dataframe so you can inspect the fields available for indexing.
     """
     )
     return
@@ -82,7 +89,7 @@ def _(mo):
         r"""
     ## Synonym generation
 
-    We'll first setup the scaffolding of setting up query -> synonym mapping. Expecting a list back of phrases -> their synonyms.
+    Our goal is to map each shopper query to a list of synonymous phrases that might appear in product data. The sections below define the structured response we expect from the LLM and the helper that will call it.
     """
     )
     return
@@ -92,17 +99,15 @@ def _(mo):
 def _(mo):
     mo.md(
         r"""
-    ### Pydantic Models for Structured Output
+    ### Pydantic models for structured output
 
-    ["Pydantic"](https://docs.pydantic.dev/latest/) is a Python way of having a struct or simple data class. It can be a useful way to serialize data to/from underlying data formats (ie JSON, protobuf). And we'll largely work at this level of abstraction.
+    We rely on [Pydantic](https://docs.pydantic.dev/latest/) to describe the payload we want back from the LLM. By handing the model a schema we:
 
-    We're using [OpenAI's structured output](https://platform.openai.com/docs/guides/structured-outputs). Which means:
+    - document the fields we need (`keywords`, `phrase`, `synonyms`),
+    - give the LLM descriptions it can use to stay on task, and
+    - let the client library validate every response before we touch it.
 
-    * Using pydantic to define the expected output (with a description that the model can use)
-    * Creating a 'struct like' view of the data we want OpenAI to produce.
-    * Forcing OpenAI to return a specific format, and not begging it to return parsable JSON
-
-    This pattern of using structured outputs is common across other vendors such al Ollama, Gemini, etc. Though there may be mild differences in how the pydantic types are interpreted.
+    OpenAI, Ollama, Gemini, and others all expose structured output modes. The mechanics differ slightly, but the pattern is the same: define a Pydantic model, pass it with the request, and get a validated object back instead of fragile JSON.
     """
     )
     return
@@ -163,17 +168,13 @@ def _(mo):
         r"""
     ### Synonym generation code
 
-    We use `AutoEnricher` in this class. This is something that wraps the calls to OpenAI in the `cheat_at_search` package.
+    The `AutoEnricher` helper centralizes LLM calls for the course. When we create an instance we specify:
 
-    Notice when constructing it, we provide three values:
+    - `model`: which OpenAI model tier to call (`gpt-4.1-nano` here to keep costs down),
+    - `system_prompt`: a short instruction block that frames the task, and
+    - `response_model`: the Pydantic schema we just defined.
 
-    * `model` -- the underlying LLM to use. If you load ChatGPT, you would notice the dropdown of models you can select. They each have pros/cons with cost and quality.
-    * `system_prompt` -- the general behavior of the agent, priming it for the task its about to perform
-    * `response_model` -- the Pydantic class to use to generate structured outputs
-
-    We can then call `enricher.enrich(prompt)` and get back an instance of `QueryWithSynonyms`
-
-    Notice too `get_prompt` generates a prompt given a search query.
+    The `get_prompt` helper formats each shopper query into a short instruction string. Calling `syn_enricher.enrich(...)` returns a `QueryWithSynonyms` object that already passed validation, so downstream code can assume every field exists.
     """
     )
     return
@@ -213,7 +214,7 @@ def _(mo):
         r"""
     ### Snowball tokenizer
 
-    We'll use a [snowball stemmer](https://www.nltk.org/api/nltk.stem.SnowballStemmer.html) when we index the data. This is just a function that takes a string and returns a list of tokens, each snowball stemmed.
+    A consistent tokenizer is critical when combining query text and synonym phrases. We use the shared `snowball_tokenizer` helper so both the original query and any generated synonym phrases collapse to the same stems before scoring.
     """
     )
     return
@@ -230,38 +231,15 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    ### Build a SearchStrategy -- Enrich, index, search
+    ### Build a SearchStrategy -- enrich, index, search
 
-    A SearchStrategy emulates a typical search system, but in a mini form suitable for dorking around in this notebook.
+    `SearchStrategy` is the lightweight harness we use to mimic a production retrieval stack. The `SynonymSearch` subclass does three things:
 
-    Notice in `__init__`, indexing:
+    1. **Indexing**: during `__init__` we create Snowball token indexes for product name and description using [SearchArray](http://github.com/softwaredoug/search-array). These act like in-memory BM25 postings lists.
+    2. **Baseline scoring**: in `search` we tokenize the shopper query, score every token against both fields, and add the weighted BM25 contributions to a single score vector.
+    3. **Synonym boosts**: after the baseline pass we call the LLM for synonyms, tokenize each suggested phrase, and add their BM25 scores to the same vector. Multi-word phrases naturally fan out into individual tokens, giving us a cheap approximation of query expansion.
 
-    ```
-        self.index['product_name_snowball'] = SearchArray.index(
-                products['product_name'],
-                snowball_tokenizer
-            )
-    ```
-
-    Then later we `search`, summing up BM25 scores across different fields:
-
-    ```
-            # ***
-            # For each token, get the BM25 score of that token in product name and
-            # product description. Sum them
-            for token in tokenized:
-                bm25_scores += self.name_boost * self.index['product_name_snowball'].array.score(token)
-                bm25_scores += self.description_boost * self.index['product_description_snowball'].array.score(
-                    token)
-    ```
-
-    Farther down, you see we boost also when we match a synonym phrase.
-
-    #### SearchArray
-
-    We use a lexical search library [SearchArray](http://github.com/softwaredoug/search-array) for simple lexical searches. (See the notebooks and information in the prework for the class)
-
-    In the case of synonyms, a lot of teams trying this have a mature lexical search system like Elasticsearch. Instead of adding embedding retrieval to the search, they try this hack to see if they can cheat at search.
+    This mirrors what many teams tried in production systems such as Elasticsearch: bolt synonym generation on top of an existing lexical ranker before investing in embedding based retrieval.
     """
     )
     return
@@ -349,9 +327,9 @@ def _(products, query_to_syn, snowball_tokenizer):
 def _(mo):
     mo.md(
         r"""
-    ### Run strategy, get results back
+    ### Run the strategy and capture results
 
-    We call `run_strategy` which behind the scene passes every WANDS query to the `syns` strategy to get search results. Then appends them all to `graded_syns` which has 480 queries times 10 results per query (4800 rows)
+    `run_strategy` iterates over all 480 WANDS queries, calls our `SynonymSearch` instance, joins in relevance grades, and returns a single dataframe. Expect 4800 rows (480 queries * 10 ranked products) that we can slice and aggregate just like the BM25 baseline.
     """
     )
     return
@@ -370,7 +348,13 @@ def _(run_strategy, syns):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""### Look at one search result...""")
+    mo.md(
+        r"""
+    ### Inspect a single query
+
+    It helps to sanity-check at least one query before diving into aggregates. The next cells show the ranked products for `wood bar stools` along with the synonyms the model produced.
+    """
+    )
     return
 
 
@@ -392,9 +376,7 @@ def _(mo):
         r"""
     ## Analyze the results
 
-    Let's look at the results to see how we did against a BM25 baseline
-
-    Here we get ndcg of each query with `ndcgs`, then compute the mean for all queries. We do this comparing BM25 vs our synonym variant
+    With both result sets in hand we can compute NDCG per query. The first comparison takes the global mean so we get a sense of the overall lift (or drop) when we add synonym expansion.
     """
     )
     return
@@ -410,12 +392,9 @@ def _(graded_bm25, graded_syns, ndcgs):
 def _(mo):
     mo.md(
         r"""
-    ### Win / loss against BM25 baseline
+    ### Wins and losses versus BM25
 
-    `ndcg_delta` shows us the per-query NDCG difference
-
-    * We note some massive wins
-    * We unfortunately also note massive variance in outcomes (meaning a risky change)
+    `ndcg_delta` surfaces the per-query difference between the synonym strategy and the baseline. Large positive deltas point to queries where synonyms surfaced products BM25 could not reach; large negatives highlight cases where noisy expansions drowned out the original intent. Watch the variance here to judge whether the experiment is safe to ship.
     """
     )
     return
@@ -431,9 +410,9 @@ def _(graded_bm25, graded_syns, ndcg_delta):
 def _(mo):
     mo.md(
         r"""
-    ### Examine a single query (what went right/wrong?)
+    ### Examine a single query (what went right or wrong?)
 
-    First we see what BM25 produced...
+    Aggregates can hide pathologies. Here we drill into `seat cushions desk`, check what the baseline returned, what the synonym strategy produced, how each compares to the human ideal, and which synonym phrases the LLM added. Toggle the `QUERY` constant to inspect other edge cases.
     """
     )
     return

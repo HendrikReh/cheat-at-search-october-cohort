@@ -6,11 +6,6 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
-    return
-
-
-@app.cell
-def _():
     import marimo as mo
     return (mo,)
 
@@ -21,15 +16,19 @@ def _(mo):
         r"""
     ## SearchArray Guide
 
-    [SearchArray](http://github.com/softwaredoug/searcharray) is intended to be a very minmial API for lexical (ie BM25) search on top of a Pandas Dataframe.
+    [SearchArray](http://github.com/softwaredoug/searcharray) wraps Lucene-style lexical search primitives in a light Pandas-friendly package. It lets us prototype indexing and scoring ideas without running a full Solr/Elasticsearch cluster.
 
-    The API is inspired by Lucene, so if you're comfortable with core search concepts from Lucene-search engines (Solr, Elasticsearch, OpenSearch, you'll be fine). Just like Lucene we have analyzers/tokenizers and similarities.
+    Think of it as "just enough" Lucene:
 
-    ### WHY!?!?
+    - analyzers/tokenizers decide how text becomes tokens,
+    - similarities compute BM25 (or your own scoring function) on those tokens, and
+    - everything lives in-memory inside familiar dataframes.
 
-    * Help prototype ideas without standing up a search engine
-    * To let people without Solr / Elasticsearch expertise propose ideas
-    * Bring the lexical / BM25 into the normal Python data world
+    ### Why use it?
+
+    - iterate on ranking ideas without provisioning infrastructure,
+    - collaborate with teammates who know Python and Pandas but not search servers, and
+    - bring BM25-style baseline experiments into notebooks where you already explore data.
     """
     )
     return
@@ -47,9 +46,9 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    ### Basic Indexing
+    ### Basic indexing
 
-    We start with basic / default tokenization that doesn't do anything special.
+    SearchArray ships with a whitespace tokenizer by default. Indexing a column stores a tokenized view in the dataframe so we can call `.score(...)` later without reprocessing text.
     """
     )
     return
@@ -84,7 +83,7 @@ def _(mo):
         r"""
     ### Basic search (single term)
 
-    Searching is just a matter of calling "score"
+    Call `.array.score(<term>)` to get BM25 scores for every row. The return value is a vector aligned with the dataframe index, so you can sort or filter like any other column.
     """
     )
     return
@@ -103,7 +102,7 @@ def _(mo):
         r"""
     ### Basic search (phrase)
 
-    Phrases are just lists of terms passed to score
+    Pass a list of tokens to `.score(...)` to compute phrase matches. Under the hood, SearchArray requires all terms to appear in the document and uses the same BM25 similarity for multi-term queries.
     """
     )
     return
@@ -120,13 +119,11 @@ def _(msgs):
 def _(mo):
     mo.md(
         r"""
-    ## Custom tokenization (aka text analysis)
+    ## Custom tokenization (text analysis)
 
-    You almost always want some kind of custom tokenization (stemming, etc).
+    Most production systems customize analysis: lowercasing, stemming, removing punctuation, etc. SearchArray lets you plug in any callable that turns text into tokens.
 
-    Luckily python comes with a rich array of stemmers, lematizers, and other functionality. SearchArray intentionally avoids creating its own library of tokenizers for this reason.
-
-    Here's an example using snowball.
+    Below we wrap the `Stemmer` Snowball stemmer to show how you might normalize accents, strip punctuation, and stem each term before indexing.
     """
     )
     return
@@ -163,9 +160,9 @@ def _(SearchArray, msgs, snowball_tokenizer):
 def _(mo):
     mo.md(
         r"""
-    ### Searching with custom tokenizer
+    ### Searching with a custom tokenizer
 
-    The `score` method expects pre-tokenized terms. You can use the `tokenizer` used at index time pretty easily.
+    When you index with a custom tokenizer, the stored `SearchArray` keeps a reference to it. Use `.array.tokenizer(query)` to ensure your query analysis matches the index, then feed the resulting token list into `.score(...)`.
     """
     )
     return
@@ -190,11 +187,11 @@ def _(msgs, tokenized_phrase):
 def _(mo):
     mo.md(
         r"""
-    ## Changing similarities
+    ## Adjusting similarities
 
-    By default, we use BM25 that attempts to mirror Lucene's BM25 implementation. But this can be changed by simply passing similarity at query time.
+    BM25 is the default similarity and tries to mirror Lucene's implementation. You can tweak it--or replace it entirely--by passing a similarity factory when scoring.
 
-    Each "similarity" is a factory function that itself returns a function. Notice below we customize bm25's k1 and b parameters.
+    Each factory returns a callable that accepts term frequencies, document frequencies, document lengths, etc., and outputs a score per document. The next cell shows how to override BM25's `k1` and `b` hyperparameters.
     """
     )
     return
@@ -216,11 +213,7 @@ def _(mo):
         r"""
     ### Custom similarity
 
-    You can also just make your own similarity if you create a function that returns a function that satisfies the contract.
-
-    Given an array of term_freqs for each doc, and other doc/term stats, you should return an array of similarity scores of the same length of term_freqs.
-
-    See the comments below with an example of raw TF*IDF
+    You are not limited to BM25. If you return a callable that consumes the standard arguments (`term_freqs`, `doc_freqs`, etc.) and emits a NumPy array of scores, SearchArray will use it. The example below implements a raw TF * IDF-style scorer for demonstration.
     """
     )
     return
@@ -261,15 +254,11 @@ def _(msgs, raw, tokenized_phrase):
 def _(mo):
     mo.md(
         r"""
-    ## Advanced queries (edismax? multi-match?)
+    ## Advanced queries (edismax, multi-match)
 
-    What about things like Solr's edismax? Or a big Elasticsearch multi-match query?
+    Complex query parsers such as Solr's `edismax` or Elasticsearch's `multi_match` boil down to combining per-field scores with weights. Because SearchArray exposes raw score arrays, we can rebuild those behaviors with a few lines of Pandas/NumPy.
 
-    Well, in the end, these things are just math. And you know what Pandas good at? Math!
-
-    So, for example, an Elasticsearch multi-match query searching different fields, multiplying them by a weight (ie boost), and then summing or taking the maximum score.
-
-    First we tokenize the query according to each field's tokenizer
+    We start by tokenizing the query once per field so each analyzer gets the right view of the text.
     """
     )
     return
@@ -289,9 +278,7 @@ def _(msgs):
 def _(mo):
     mo.md(
         r"""
-    Then we get a score for each field, for each query term.
-
-    The resultiing arrays are shaped num_terms x num_docs
+    Then we compute per-term scores from each field. The resulting matrices are shaped `(num_terms, num_docs)`, which makes it easy to mix-and-match aggregation strategies.
     """
     )
     return
@@ -313,9 +300,9 @@ def _(msgs, np, query_as_snowball):
 def _(mo):
     mo.md(
         r"""
-    ## Take max-per-term (ie 'dismax')
+    ## Take max-per-term (dismax)
 
-    In search, ["disjunction maximum"](https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-dis-max-query.html) or "dismax" just means take the maximum score. That's pretty easy to do with these two arrays. It sits underneath the hood of many base queries like edismax or multi-match.
+    A disjunction maximum query picks the best field score per term, then sums the winners. The code here mirrors that logic across the two field-specific matrices we just built. This is effectively what Solr's `edismax` or Elasticsearch's `multi_match` with `type=best_fields` do under the hood.
     """
     )
     return
@@ -347,7 +334,13 @@ def _(msgs, scores):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""## Simulate edismax query parser""")
+    mo.md(
+        r"""
+    ## Simulate edismax query parser
+
+    If you do not want to hand-roll the math, `searcharray.solr.edismax` wraps the same idea into a helper. Provide the fields (`qf`) you want to search, their boosts if desired, and a query string; the function returns scores along with an optional explanation.
+    """
+    )
     return
 
 

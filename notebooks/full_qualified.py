@@ -14,22 +14,22 @@ def _():
 def _(mo):
     mo.md(
         r"""
-        # Query -> Full classification
-    
+        # Query -> Fully Qualified Classification
+
         <small>
         (from <a href="http://maven.com/softwaredoug/cheat-at-search">Cheat at Search with LLMs</a> training course by Doug Turnbull.)
         </small>
-    
-        In this refinement on [past examples](https://colab.research.google.com/drive/1AfK3uGV3Lbrv5henj995YV4XEpVmLpBf) we will get away from classifying to category / subcategory independently and classify to the full classification, ie a query to one of the following
-    
-    
-        ```
-        Furniture / Living Room Furniture / Chairs & Seating / Accent Chairs,
-        Rugs / Area Rugs,
-        ...
-        ```
-    
-        We will recompute the previous stats to see how well this works.
+
+        Earlier notebooks asked the LLM to guess top-level `category` and `sub_category` fields independently. That often produced illegal combinations (for example, a kids' product with an adult furniture subcategory). In this iteration we tighten that loop by requesting a single, fully qualified taxonomy path such as `Furniture / Living Room Furniture / Chairs & Seating / Accent Chairs`.
+
+        The returned path is easy to split back into category and subcategory, but we keep the selection consistent because the model only chooses from strings we whitelist. This notebook walks through:
+
+        - assembling the list of valid fully qualified merchandising paths the model may return,
+        - wiring an `AutoEnricher` prompt that nudges GPT-4o to choose one of those paths or opt out,
+        - recomputing offline ground truth so we have a target to measure against, and
+        - rerunning our category-boosted BM25 strategy to see how rankings change.
+
+        By the end we should understand whether the extra structure reduces noise and how much it costs in API spend and evaluation time.
         """
     )
     return
@@ -47,13 +47,11 @@ def _():
 def _(mo):
     mo.md(
         r"""
-        ## Query -> Full classification
-    
-        We'll first setup the model of query -> the full classification.
-    
-        Here we provide a long list of valid full classifications for the LLM to use.
-    
-        **Warning** this gets expensive. It'll cost $5 or so to run. We'll quickly switch to some ways of saving costs, so no worries
+        ## Configure the fully qualified classifier
+
+        The next cells seed the LLM with the exact taxonomy strings it is allowed to emit. Instead of predicting `category` and `sub_category` separately, we give it the full merchandising path and have Pydantic validate the response.
+
+        That giant literal list might look unwieldy, but it keeps the model honest--if a path is not enumerated the validator will reject it and we record a `No Classification Fits` fallback. Because the prompt now contains hundreds of options, each batch of calls is noticeably more expensive (roughly $5 for the entire evaluation set). Later we can experiment with pruning the list or caching responses to control costs, but for now we keep it exhaustive to establish an upper bound on quality.
         """
     )
     return
@@ -438,9 +436,11 @@ def _():
 def _(mo):
     mo.md(
         r"""
-        ### Query classification code
-    
-        This code is quite similar to previous iterations, **change** -- we're returning the classification now. Then we use this to parse out the category (top level) and sub category (second level)
+        ### Query classification helper
+
+        The `AutoEnricher` instance mirrors the setup from earlier notebooks, but the contract changes: the `QueryClassification` model now returns the entire taxonomy path. `get_prompt_fully_qualified` builds a concise instruction block that reminds the model to pick from the provided schema or abstain when the query is ambiguous.
+
+        The `fully_classified` wrapper keeps the call site friendly for downstream code. It emits a structured object whose `.category` and `.sub_category` properties simply split the returned path. The quick debug calls at the bottom (`"dinosaur"`, `"sofa loveseat"`) help confirm the prompt behaves before we pay for a larger batch run.
         """
     )
     return
@@ -482,11 +482,15 @@ def _(AutoEnricher, QueryClassification):
 def _(mo):
     mo.md(
         r"""
-        ### Redefine ground truth
-    
-        This is the same ground truth from previous notebooks.
-    
-        We map the query to relevant products, then look to see the dominant category is for that query
+        ### Recompute ground-truth expectations
+
+        We reuse the manually graded Wands dataset but collapse it into a single expected category per query. The helper functions below:
+
+        - gather all products with grade `2` (highly relevant) for each query,
+        - tally their categories and subcategories, and
+        - keep only those labels that account for at least 80% of the relevant products.
+
+        If no label clears that confidence threshold we mark the query as `No Category Fits`. This gives us a realistic target to compare the LLM against without pretending every query has a unanimous answer.
         """
     )
     return
@@ -563,9 +567,9 @@ def _(fully_classified):
 def _(mo):
     mo.md(
         r"""
-        ### On impacted queries
-    
-        We know from the "perfect classifier" these queries would most benefit from this change. Let's see how we perform on these queries.
+        ### Focus on the riskiest queries
+
+        The list below comes from the "perfect classifier" sanity check we ran earlier: these are the search phrases that should improve the most if our classifier nails the taxonomy. By filtering the evaluation to this slice we can see whether the new approach actually fixes the biggest pain points before worrying about the long tail.
         """
     )
     return
@@ -655,18 +659,18 @@ def _(fully_classified, ground_truth_cat, impacted_queries2, prec_cat):
 def _(mo):
     mo.md(
         r"""
-        ## Run Category search strategy with classifier
-    
-        Here we have an identical strategy as before to boost category / sub category
-    
-        Notice in the `search` method we go through the following flow:
-    
-        1. Classify query -> classification, using the passed function `query_to_cat`
-        2. Perform a normal BM25 boost
-        3. Boost category matches by category_boost
-        4. Boost subcategory matches by subcategory boost
-    
-        **Idea to try** -- try REQUIRING a BM25 match before applying the category boost instead of just adding to the BM25 score -- which would include anything with BM25 score of 0.
+        ## Run the category-aware search strategy
+
+        With the classifier in place we can plug it into the existing `CategorySearch` strategy. The flow is identical to our prior experiment, but the classifier now returns a reliable fully qualified path.
+
+        Inside the `search` method we:
+
+        1. call `query_to_cat` (the LLM wrapper) to grab the suggested taxonomy path,
+        2. compute standard BM25 scores over product name and description tokens,
+        3. bump any product whose category matches the structured output, and
+        4. give a smaller bump for subcategory matches.
+
+        Because we add boosts on top of raw BM25 scores, even products with a zero lexical match can float up if their category matches. A future refinement would be to zero out boosts for items without a lexical match so we retain some textual grounding.
         """
     )
     return
@@ -768,10 +772,8 @@ def _(mo):
     mo.md(
         r"""
         ### Analyze the results
-    
-        We notice
-        * good NDCG change
-        * limited downside impact to other queries
+
+        The next few cells recompute mean NDCG, deltas between the baseline BM25 run and the category-aware run, and count how many queries clear our +/- 0.1 significance band. Keep an eye on both the magnitude of the lift and how often we regress--an improvement that helps only a handful of queries while tanking others is not worth the additional complexity.
         """
     )
     return
@@ -808,7 +810,13 @@ def _(deltas, sig_improved):
 
 @app.cell
 def _(mo):
-    mo.md(r"### Look at a query")
+    mo.md(
+        r"""
+        ### Inspect individual queries
+
+        Aggregate metrics are helpful, but the quickest way to build intuition is to drill into a single query. The cells that follow pull the LLM classification, the derived ground truth labels, and the side-by-side ranked products for both the boosted and baseline strategies. Tweak `QUERY` to sanity-check other edge cases as you iterate.
+        """
+    )
     return
 
 
