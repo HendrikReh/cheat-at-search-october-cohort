@@ -233,12 +233,12 @@ def _(graded_bm25, vs_ideal):
 
 
 @app.cell
-def _(QUERY):
+def _(QUERY1):
     from cheat_at_search.wands_data import labeled_query_products
 
     RELEVANT = 2
     MEH = 1
-    labeled_query_products[(labeled_query_products['query'] == QUERY) &
+    labeled_query_products[(labeled_query_products['query'] == QUERY1) &
                            (labeled_query_products['grade'] == MEH)][['query', 'product_id', 'category hierarchy']]
     return
 
