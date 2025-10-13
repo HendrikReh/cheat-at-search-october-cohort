@@ -8,12 +8,13 @@ query and content understanding.
 
 The notebooks in `notebooks/` build on one another to explore how lexical search works and how LLM-driven enrichment can improve it. If you are new to the project, work through them in the order below:
 
-1. **`notebooks/tokenization.py` – Tokenization fundamentals.** Introduces lexical search concepts, shows how naive tokenization fails on case/punctuation, and demonstrates how normalization fixes matches.
-2. **`notebooks/query_tokenization.py` – Query-time control.** Applies the same tokenizer to incoming queries, illustrates OR vs AND semantics, and connects those choices to Elasticsearch/Vespa-style query DSLs.
-3. **`notebooks/search_array_guide.py` – SearchArray deep dive.** Expands on tokenization with custom analyzers, similarity tweaks, and multi-field query composition so you can prototype Lucene-style behaviors in Pandas.
-4. **`notebooks/analyze_bm25.py` – Baseline evaluation.** Runs a pure BM25 strategy on the WANDS dataset, surfaces low-NDCG queries, and establishes metrics you’ll reuse when comparing experiments.
-5. **`notebooks/synonyms_from_llms.py` – LLM-generated expansion.** Uses structured LLM calls to inject synonyms into the lexical pipeline and compares the results against the BM25 baseline.
-6. **`notebooks/full_qualified.py` – Structured classification boost.** Classifies queries into fully qualified taxonomy paths, folds that structure into a category-aware search strategy, and evaluates the lift over BM25.
+1. **`notebooks/0_AI_Introduction_to_Lexical_and_BM25_tokenization.py` – Tokenization fundamentals.** Introduces lexical search concepts, shows how naive tokenization fails on case/punctuation, and demonstrates how normalization fixes matches.
+2. **`notebooks/1_AI_Introduction_to_Lexical_and_BM25_query_tokenization.py` – Query-time control.** Applies the same tokenizer to incoming queries, illustrates OR vs AND semantics, and connects those choices to Elasticsearch/Vespa-style query DSLs.
+3. **`notebooks/2_AI_Introduction_to_Lexical_and_BM25_TFIDF_scoring.py` – TF*IDF and BM25 intuition.** Builds custom similarity functions to illustrate term frequency, document frequency, TF*IDF weighting, and how BM25 extends those ideas.
+4. **`notebooks/3_AI_Introduction_to_Lexical_and_BM25_Searching_multiple_fields.py` – Multi-field scoring.** Compares field-centric (sum) versus term-centric (dismax) strategies, explores stemming to align fields, and shows how to blend contributions responsibly.
+5. **`notebooks/4_AI_Introduction_to_Lexical_and_BM25_Is_there_a_better_TFIDF_.py` – Toward BM25.** Highlights the shortcomings of naive TF*IDF (saturation, length bias) and evolves the scoring formula toward BM25’s parameterization.
+6. **`notebooks/5_AI_Introduction_to_Lexical_and_BM25_BM25F_step_by_step.py` – BM25F blending.** Demonstrates how to share document frequency across fields, apply per-field normalization, and replicate BM25F logic.
+7. **`notebooks/0_Cheat_at_Search_with_LLMs_Analyze_BM25.py` – Baseline evaluation.** Runs a pure BM25 strategy on the WANDS dataset, surfaces low-NDCG queries, and establishes metrics you’ll reuse when comparing experiments.
 
 Running them sequentially gives you the prerequisite context for each successive experiment and mirrors the enablement arc from core lexical control to LLM-assisted ranking tweaks.
 
