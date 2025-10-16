@@ -63,10 +63,9 @@ You're now ready to explore the notebooks!
 
 ```text
 cheat-at-search-october-cohort/
-├── notebooks/              # Marimo notebooks for experiments
-│   ├── 0_AI_*.py          # Lexical search fundamentals (BM25)
-│   ├── 0_Cheat_*.py       # BM25 baseline evaluation
-│   ├── 2b_Cheat_*.py      # LLM query categorization experiments
+├── notebooks/              # Marimo notebooks converted from the course’s Jupyter content
+│   ├── *.py               # Each file is a marimo notebook (converted `.ipynb`); originals live in notebooks/jupyter/
+│   ├── homework/          # Course homework exercises ported to marimo
 │   └── ...
 ├── .env                    # API keys (not in git)
 ├── pyproject.toml         # Dependencies and project config
