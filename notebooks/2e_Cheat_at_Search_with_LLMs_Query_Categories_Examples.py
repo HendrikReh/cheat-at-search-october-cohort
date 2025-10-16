@@ -14,7 +14,7 @@ def _(mo):
     (from <a href="http://maven.com/softwaredoug/cheat-at-search">Cheat at Search with LLMs</a> training course by Doug Turnbull.)
     </small>
 
-    **Refinement** -- Use the -full list- of classifications, and allow a list to be returned
+    **Refinement** -- Give some hints we see from the furniture data
 
     We learned that we want to try to model aspects of the user's _information need_ not just make queries better.
 
@@ -22,6 +22,48 @@ def _(mo):
     """
     )
     return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+    ## Boilerplate
+
+    Install deps, mount GDrive, prompt for your OpenAI Key (placed in your GDrive)
+    """
+    )
+    return
+
+
+@app.cell
+def _():
+    # (use marimo's built-in package management features instead) !pip install git+https://github.com/softwaredoug/cheat-at-search.git
+    return
+
+
+@app.cell
+def _():
+    import os
+    from pathlib import Path
+    from cheat_at_search.data_dir import DATA_PATH
+
+    data_dir = Path(DATA_PATH)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Using {data_dir} for data")
+
+    key_path = data_dir / "openai_key.txt"
+    env_key = os.getenv("OPENAI_API_KEY")
+    if env_key:
+        if not key_path.exists():
+            key_path.write_text(env_key.strip())
+        print("Loaded OpenAI key from environment variable.")
+    elif key_path.exists():
+        print("Found openai key on filesystem")
+    else:
+        raise RuntimeError("OpenAI key not found. Set OPENAI_API_KEY or create openai_key.txt in the data directory.")
+
+    return (data_dir,)
 
 
 @app.cell(hide_code=True)
@@ -38,7 +80,7 @@ def _(mo):
 
 @app.cell
 def _():
-    from cheat_at_search.search import run_strategy, graded_bm25, ndcgs, ndcg_delta
+    from cheat_at_search.search import run_strategy, graded_bm25, ndcgs, ndcg_delta, vs_ideal
     return graded_bm25, ndcg_delta, ndcgs, run_strategy
 
 
@@ -117,65 +159,45 @@ def _(mo):
 @app.cell
 def _(AutoEnricher, QueryClassification):
     enricher = AutoEnricher(
-         model="openai/gpt-4o",
+         model="openai/gpt-4.1-nano",
          system_prompt="You are a helpful furniture shopping agent that helps users construct search queries.",
          response_model=QueryClassification
     )
 
     def get_prompt_fully_qualified(query):
-        """
-        Generate LLM prompt for multi-classification with diversity.
+            prompt = f"""
+            As a helpful agent, you'll recieve requests from users looking for furniture products.
 
-        Args:
-            query: User's search query string
+            Your task is to search with a structured query against a furniture product catalog.
 
-        Returns:
-            Formatted prompt string for the LLM
-        """
-        prompt = f"""
-        As a helpful agent, you'll receive requests from users looking for furniture products.
+            Here is the users request:
 
-        Your task is to search with a structured query against a furniture product catalog.
+            {query}
 
-        Here is the user's request:
+            Return the best classifications for this user's query.
 
-        {query}
+            Try to pick as diverse a set of possible to ensure the customer finds what they need.
+            (IE different top level categories are better than very similar classifications that share most of their tree / subtree)
 
-        Return the best classifications for this user's query.
+            Keep in mind some notes about the furniture domain
+            * bistro tables are for outdoors
+            *
 
-        Try to pick as diverse a set as possible to ensure the customer finds what they need.
-        (i.e., different top level categories are better than very similar classifications that share most of their tree/subtree)
+            Return an empty list if no classification fits, or its too ambiguous.
 
-        Return an empty list if no classification fits, or if it's too ambiguous.
+            """
 
-        """
-
-        return prompt
+            return prompt
 
     def fully_classified(query):
-        """
-        Classify a query into multiple diverse category paths using an LLM.
-
-        This function allows returning multiple classifications to capture query
-        ambiguity and multi-intent searches. It emphasizes diversity in the
-        returned classifications to broaden search coverage.
-
-        Args:
-            query: Search query string
-
-        Returns:
-            QueryClassification with a list of fully qualified classification paths
-        """
         prompt = get_prompt_fully_qualified(query)
         classification = enricher.enrich(prompt).model_copy()
-        # Remove "No Classification Fits" from the list if present
         if "No Classification Fits" in classification.classifications:
             classification.classifications = []
         return classification
 
-    # Test with sample queries
     fully_classified("dinosaur"), fully_classified("sofa loveseat")
-    return enricher, fully_classified, get_prompt_fully_qualified
+    return (fully_classified,)
 
 
 @app.cell(hide_code=True)
@@ -186,129 +208,38 @@ def _(mo):
 
 @app.cell
 def _():
+    CUTOFF = 0.8
+
     from cheat_at_search.wands_data import labeled_query_products, queries
 
-    def get_top_categories(column, no_fit_label, cutoff=0.8):
-        """
-        Extract ground truth categories from labeled query-product pairs.
+    # Get relevant products per query
+    top_products = labeled_query_products[labeled_query_products['grade'] == 2]
 
-        Args:
-            column: Column name to analyze ('category' or 'sub_category')
-            no_fit_label: Label to use when no dominant category exists
-            cutoff: Threshold for considering a category relevant (default 0.8)
+    # Aggregate top categories
+    categories_per_query_ideal = top_products.groupby('query')['category'].value_counts().reset_index()
 
-        Returns:
-            DataFrame with query, category/subcategory, and proportion
-        """
-        # Get relevant products per query (grade 2 = highly relevant)
-        top_products = labeled_query_products[labeled_query_products['grade'] == 2]
+    # Get as percentage of all categories for this query
+    top_cat_proportion = categories_per_query_ideal.groupby(['query', 'category']).sum() / categories_per_query_ideal.groupby('query').sum()
+    top_cat_proportion = top_cat_proportion.drop(columns='category').reset_index()
 
-        # Aggregate top categories per query
-        categories_per_query_ideal = top_products.groupby('query')[column].value_counts().reset_index()
-
-        # Calculate proportion of each category for this query
-        top_cat_proportion = categories_per_query_ideal.groupby(['query', column]).sum() / categories_per_query_ideal.groupby('query').sum()
-        top_cat_proportion = top_cat_proportion.drop(columns=column).reset_index()
-
-        # Only keep categories above the cutoff threshold
-        top_cat_proportion = top_cat_proportion[top_cat_proportion['count'] > cutoff]
-        top_cat_proportion[column].fillna(no_fit_label, inplace=True)
-        ground_truth_cat = top_cat_proportion
-
-        # Assign 'No Category Fits' to queries without categories above threshold
-        ground_truth_cat = ground_truth_cat.merge(queries, how='right', on='query')[['query', column, 'count']]
-        ground_truth_cat[column].fillna(no_fit_label, inplace=True)
-        return ground_truth_cat
-
-    # The original ground truth by category
-    ground_truth_cat = get_top_categories('category', 'No Category Fits', cutoff=0.8)
-
-
-    ground_truth_cat_list = get_top_categories('category', 'No Category Fits', cutoff=0.05)
-
-    # Group by query, collect category into list
-    ground_truth_cat_list = ground_truth_cat_list.groupby('query').agg({'category': list}).reset_index()
-    # Remove empty items on "No Category Fits" from lists
-    ground_truth_cat_list['category'] = ground_truth_cat_list['category'].apply(lambda x: [y.strip() for y in x if y and y != 'No Category Fits'])
-    ground_truth_cat_list
-    return ground_truth_cat, ground_truth_cat_list
-
-
-@app.cell
-def _(fully_classified, ground_truth_cat_list):
-    def get_preds(cat, column):
-        """Extract categories or subcategories from classifier result."""
-        if column == 'category':
-            return cat.categories
-        elif column == 'sub_category':
-            return cat.sub_categories
-        else:
-            raise ValueError(f'Unknown column {column}')
-
-    def jaccard_sim(ground_truth, column, no_fit_label, classifier_fn):
-        """
-        Calculate Jaccard similarity between predicted and ground truth category sets.
-
-        Args:
-            ground_truth: DataFrame with ground truth categories as lists
-            column: Column name to evaluate ('category' or 'sub_category')
-            no_fit_label: Label used when no category fits
-            classifier_fn: Function that classifies queries
-
-        Returns:
-            Tuple of (mean_jaccard_similarity, coverage)
-        """
-        jaccard_sum = 0
-        num_preds = 0
-        for _, row in ground_truth.iterrows():
-            query = row['query']
-            expected_category = set(row[column])
-            cat = classifier_fn(query)
-            preds = set(get_preds(cat, column))
-
-            if len(preds) == 0 or preds == [no_fit_label]:
-                print(f'Skipping {query}')
-                continue
-
-            # Jaccard similarity: intersection over union
-            jaccard = len(preds.intersection(expected_category)) / len(preds.union(expected_category))
-            print(f'{query} -- pred:{preds} == expected:{expected_category}')
-            print(f'Jaccard: {jaccard}')
-            jaccard_sum += jaccard
-            num_preds += 1
-
-        return (jaccard_sum / num_preds, num_preds / len(ground_truth))
-    jaccard, coverage = jaccard_sim(ground_truth_cat_list, 'category', 'No Category Fits', fully_classified)
-    (jaccard, coverage)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""### Maybe a better question -- do we recall the most important prediction?""")
-    return
+    # Only look at cases where the category is > 0.8
+    top_cat_proportion = top_cat_proportion[top_cat_proportion['count'] > CUTOFF]
+    top_cat_proportion['category'].fillna('No Category Fits', inplace=True)
+    ground_truth_cat = top_cat_proportion
+    # Give No Category Fits to all others without dominant category
+    ground_truth_cat = ground_truth_cat.merge(queries, how='right', on='query')[['query', 'category', 'count']]
+    ground_truth_cat['category'].fillna('No Category Fits', inplace=True)
+    ground_truth_cat
+    return (ground_truth_cat,)
 
 
 @app.cell
 def _(fully_classified, ground_truth_cat):
-    def recall_when_pred(categorized, ground_truth_cat):
-        """
-        Calculate recall when the classifier predicts a category.
-
-        Only evaluates queries where the classifier returned a prediction
-        (skips queries where classifier returned no classification).
-
-        Args:
-            categorized: Classifier function that returns QueryClassification
-            ground_truth_cat: DataFrame with ground truth categories
-
-        Returns:
-            Tuple of (recall_score, hits_list, misses_list)
-        """
-        _hits = []
-        _misses = []
+    def prec_cat(categorized):
+        hits = []
+        misses = []
         idx = 0
-        for _, row in ground_truth_cat.iterrows():
+        for _, row in ground_truth_cat.sample(frac=1).iterrows():
             query = row['query']
             expected_category = row['category']
             cat = categorized(query)
@@ -318,41 +249,29 @@ def _(fully_classified, ground_truth_cat):
             if expected_category != 'No Category Fits':
                 if expected_category.strip() in cat.categories:
                     print(f'{idx} q:{query} -- pred:{cat.categories} == expected:{expected_category.strip()}')
-                    _hits.append((expected_category, cat))
+                    hits.append((expected_category, cat))
                 else:
                     print('***')
                     print(f'{query} -- pred:{cat.categories} != expected:{expected_category.strip()}')
                     print(cat.classifications)
-                    _misses.append((expected_category, cat))
-                    num_so_far = len(_hits) + len(_misses)
-                    print(f'{idx} recall (N={num_so_far}) -- {len(_hits) / (len(_hits) + len(_misses))}')
+                    misses.append((expected_category, cat))
+                    num_so_far = len(hits) + len(misses)
+                    print(f'{idx} recall (N={num_so_far}) -- {len(hits) / (len(hits) + len(misses))}')
             idx = idx + 1
-        return (len(_hits) / (len(_hits) + len(_misses)), _hits, _misses)
-    prec, _hits, _misses = recall_when_pred(fully_classified, ground_truth_cat)
+        return (len(hits) / (len(hits) + len(misses)), hits, misses)
+    prec, hits, misses = prec_cat(fully_classified)
     prec
     return
 
 
 @app.cell
 def _(fully_classified, ground_truth_cat):
-    def recall_all(categorized, ground_truth):
-        """
-        Calculate recall across all queries including classification failures.
-
-        Evaluates all queries, treating both incorrect predictions and
-        predictions where no category fits as misses.
-
-        Args:
-            categorized: Classifier function that returns QueryClassification
-            ground_truth: DataFrame with ground truth categories
-
-        Returns:
-            Tuple of (recall_score, hits_list, misses_list)
-        """
-        _hits = []
-        _misses = []
+    def recall_all(categorized):
+        """When we retrieve a category, is it correct?"""
+        hits = []
+        misses = []
         idx = 0
-        for _, row in ground_truth.sample(frac=1).iterrows():
+        for _, row in ground_truth_cat.sample(frac=1).iterrows():
             query = row['query']
             expected_category = row['category']
             cat = categorized(query)
@@ -360,25 +279,24 @@ def _(fully_classified, ground_truth_cat):
                 print(f'{idx} Skipping {query}')
                 continue
             if expected_category == 'No Category Fits' and len(cat.categories) > 0:
-                print('!**')
-                print(f'{query} -- pred:{cat.categories} != expected:{expected_category.strip()}')
+                print('!**')  # ***
+                print(f'{query} -- pred:{cat.categories} != expected:{expected_category.strip()}')  # Now also consider this a miss, we should not have predicted any caterogies
                 print(cat.classifications)
-                _misses.append((expected_category, cat))
-                num_so_far = len(_hits) + len(_misses)
-                print(f'{idx} recall (N={num_so_far}) -- {len(_hits) / (len(_hits) + len(_misses))}')
-            if expected_category.strip() in cat.categories:
-                print(f'{idx} q:{query} -- pred:{cat.categories} == expected:{expected_category.strip()}')
-                _hits.append((expected_category, cat))
+                misses.append((expected_category, cat))
+                num_so_far = len(hits) + len(misses)
+                print(f'{idx} recall (N={num_so_far}) -- {len(hits) / (len(hits) + len(misses))}')
+            elif expected_category.strip() in cat.categories:
+                hits.append((expected_category, cat))
             else:
                 print('***')
-                print(f'{query} -- pred:{cat.categories} != expected:{expected_category.strip()}')
+                print(f'{query} -- pred:{cat.categories} != expected:{expected_category.strip()}')  # print(f"{idx} q:{query} -- pred:{cat.categories} == expected:{expected_category.strip()}")
                 print(cat.classifications)
-                _misses.append((expected_category, cat))
-                num_so_far = len(_hits) + len(_misses)
-                print(f'{idx} recall (N={num_so_far}) -- {len(_hits) / (len(_hits) + len(_misses))}')
+                misses.append((expected_category, cat))
+                num_so_far = len(hits) + len(misses)
+                print(f'{idx} recall (N={num_so_far}) -- {len(hits) / (len(hits) + len(misses))}')
             idx = idx + 1
-        return (len(_hits) / (len(_hits) + len(_misses)), _hits, _misses)
-    recall, _hits, _misses = recall_all(fully_classified, ground_truth_cat)
+        return (len(hits) / (len(hits) + len(misses)), hits, misses)
+    recall, hits_1, misses_1 = recall_all(fully_classified)
     recall
     return
 
@@ -417,74 +335,62 @@ def _():
         def search(self, query, k=10):
             """Dumb baseline lexical search, but add a constant boost when
                the desired category or subcategory"""
-            # Baseline BM25 search
             bm25_scores = np.zeros(len(self.index))
             structured = self.query_to_cat(query)
             tokenized = snowball_tokenizer(query)
             for token in tokenized:
                 bm25_scores = bm25_scores + self.index['product_name_snowball'].array.score(token) * self.name_boost
                 bm25_scores = bm25_scores + self.index['product_description_snowball'].array.score(token) * self.description_boost
-
-            # If there's a subcategory, boost that by a constant amount
             for sub_category in structured.sub_categories:
                 tokenized_subcategory = snowball_tokenizer(sub_category)
-                subcategory_match = np.zeros(len(self.index))
+                subcategory_match = np.ones(len(self.index))
                 if tokenized_subcategory:
                     subcategory_match = self.index['subcategory_snowball'].array.score(tokenized_subcategory) > 0
                 bm25_scores[subcategory_match] = bm25_scores[subcategory_match] + self.sub_category_boost
-
-            # If there's a category, boost that by a constant amount
             for category in structured.categories:
                 tokenized_category = snowball_tokenizer(category)
-                category_match = np.zeros(len(self.index))
+                category_match = np.ones(len(self.index))
                 if tokenized_category:
                     category_match = self.index['category_snowball'].array.score(tokenized_category) > 0
                 bm25_scores[category_match] = bm25_scores[category_match] + self.category_boost
-
             top_k = np.argsort(-bm25_scores)[:k]
             scores = bm25_scores[top_k]
-            return (top_k, scores)
+            return (top_k, scores)  # ****  # Baseline BM25 search from before  # ****  # If there's a subcategory, boost that by a constant amount  # ****  # If there's a category, boost that by a constant amount
     return CategorySearch, SearchArray, SearchStrategy, np, snowball_tokenizer
 
 
 @app.cell
 def _(CategorySearch, fully_classified, products, run_strategy):
-    _categorized_search = CategorySearch(products, fully_classified)
-    graded_categorized = run_strategy(_categorized_search)
+    categorized_search = CategorySearch(products, fully_classified)
+    graded_categorized = run_strategy(categorized_search)
     graded_categorized
     return (graded_categorized,)
 
 
 @app.cell
 def _(graded_bm25, graded_categorized, ndcgs):
-    # Compare mean NDCG scores: baseline BM25 vs. LLM-enhanced category search
     ndcgs(graded_bm25).mean(), ndcgs(graded_categorized).mean()
     return
 
 
 @app.cell
 def _(graded_bm25, graded_categorized, ndcg_delta):
-    # Calculate per-query NDCG delta (categorized - BM25)
-    # Positive values indicate improvement, negative indicate degradation
     deltas = ndcg_delta(graded_categorized, graded_bm25)
     return (deltas,)
 
 
 @app.cell
 def _(deltas):
-    # Count queries with significant improvement (NDCG delta > 0.1)
     sig_improved = len(deltas[deltas > 0.1])
-    print(f"Num Significantly Improved: {sig_improved}")
+    print(f"Num Significatly Improved: {sig_improved}")
     deltas[deltas > 0.1]
     return (sig_improved,)
 
 
 @app.cell
 def _(deltas, sig_improved):
-    # Count queries with significant degradation (NDCG delta < -0.1)
-    # Calculate proportion of improved vs. harmed queries
     sig_harmed = len(deltas[deltas < -0.1])
-    print(f"Num Significantly Harmed: {sig_harmed}")
+    print(f"Num Significatly Harmed: {sig_harmed}")
     print(f"Prop improved/harmed: {sig_improved / (sig_harmed + sig_improved)} | {sig_harmed / (sig_harmed + sig_improved)}")
     deltas[deltas < -0.1]
     return
@@ -544,7 +450,6 @@ def _(SearchArray, SearchStrategy, np, snowball_tokenizer):
         def search(self, query, k=10):
             """Dumb baseline lexical search, but add a constant boost when
                the desired category or subcategory"""
-            # Baseline BM25 search
             bm25_scores = np.zeros(len(self.index))
             structured = self.query_to_cat(query)
             tokenized = snowball_tokenizer(query)
@@ -554,70 +459,37 @@ def _(SearchArray, SearchStrategy, np, snowball_tokenizer):
                 desc_score = self.index['product_description_snowball'].array.score(token) * self.description_boost
                 bm25_scores = bm25_scores + (name_score + desc_score)
                 num_tokens_matched[name_score + desc_score > 0] = num_tokens_matched[name_score + desc_score > 0] + 1
-
-            # If there's a subcategory, boost that by a constant amount
             for sub_category in structured.sub_categories:
                 tokenized_subcategory = snowball_tokenizer(sub_category)
-                subcategory_match = np.zeros(len(self.index))
+                subcategory_match = np.ones(len(self.index))
                 if tokenized_subcategory:
                     subcategory_match = self.index['subcategory_snowball'].array.score(tokenized_subcategory) > 0
                 bm25_scores[subcategory_match] = bm25_scores[subcategory_match] + self.sub_category_boost
-
-            # If there's a category, boost that by a constant amount
             for category in structured.categories:
                 tokenized_category = snowball_tokenizer(category)
-                category_match = np.zeros(len(self.index))
+                category_match = np.ones(len(self.index))
                 if tokenized_category:
                     category_match = self.index['category_snowball'].array.score(tokenized_category) > 0
                 bm25_scores[category_match] = bm25_scores[category_match] + self.category_boost
-
-            # Penalize documents that don't match enough query tokens
             min_token_match = max(len(tokenized) / 2, 1)
             bm25_scores[num_tokens_matched < min_token_match] = bm25_scores[num_tokens_matched < min_token_match] * 0.8
-
             top_k = np.argsort(-bm25_scores)[:k]
             scores = bm25_scores[top_k]
-            return (top_k, scores)
+            return (top_k, scores)  # ****  # Baseline BM25 search from before  # ****  # If there's a subcategory, boost that by a constant amount  # ****  # If there's a category, boost that by a constant amount  # ***  # Require all tokens to match
     return (CategorySearch_1,)
 
 
 @app.cell
 def _(CategorySearch_1, fully_classified, products, run_strategy):
-    _categorized_search = CategorySearch_1(products, fully_classified)
-    graded_categorized2 = run_strategy(_categorized_search)
+    categorized_search_1 = CategorySearch_1(products, fully_classified)
+    graded_categorized2 = run_strategy(categorized_search_1)
     graded_categorized2
     return (graded_categorized2,)
 
 
 @app.cell
 def _(graded_bm25, graded_categorized2, ndcgs):
-    # Compare NDCG scores with CategorySearch_1 (includes token matching penalty)
     ndcgs(graded_bm25).mean(), ndcgs(graded_categorized2).mean()
-    return
-
-
-@app.cell
-def _(CategorySearch_1, fully_classified, products, run_strategy):
-    # Test with significantly higher category boosts to amplify classification impact
-    _categorized_search = CategorySearch_1(products, fully_classified, category_boost=100, sub_category_boost=50)
-    graded_categorized_1 = run_strategy(_categorized_search)
-    graded_categorized_1
-    return
-
-
-@app.cell
-def _(enricher, get_prompt_fully_qualified):
-    def get_num_tokens(query):
-        prompt = get_prompt_fully_qualified(query)
-        return enricher.get_num_tokens(prompt)
-
-    get_num_tokens("loveseat sofa")
-    return (get_num_tokens,)
-
-
-@app.cell
-def _(get_num_tokens):
-    get_num_tokens("loveseat")
     return
 
 

@@ -80,7 +80,7 @@ cheat-at-search-october-cohort/
 
 The notebooks in `notebooks/` build on one another to explore how lexical search works and how LLM-driven enrichment can improve it. If you are new to the project, work through them in the order below:
 
-### Part 1: Lexical Search Fundamentals
+### Part 1: Lexical Search Fundamentals (Phase 1)
 
 1. **`0_AI_Introduction_to_Lexical_and_BM25_tokenization.py` – Tokenization fundamentals**
 
@@ -106,23 +106,88 @@ The notebooks in `notebooks/` build on one another to explore how lexical search
 
    Demonstrates how to share document frequency across fields, apply per-field normalization, and replicate BM25F logic.
 
+**Run Phase 1:**
+```bash
+cd notebooks
+uv run marimo edit 0_AI_Introduction_to_Lexical_and_BM25_tokenization.py
+# ... continue through notebooks 1-5 in sequence
+```
+
 ### Part 2: LLM-Enhanced Search
 
-1. **`0_Cheat_at_Search_with_LLMs_Analyze_BM25.py` – Baseline evaluation**
+#### Phase 2: Establish Baselines
 
-   Runs a pure BM25 strategy on the WANDS dataset, surfaces low-NDCG queries, and establishes metrics you'll reuse when comparing experiments.
+7. **`0_Cheat_at_Search_with_LLMs_Analyze_BM25.py` – BM25 baseline evaluation**
 
-2. **`2b_Cheat_at_Search_with_LLMs_Perfect_Categorization.py` – Perfect categorization**
+   Runs a pure BM25 strategy on the WANDS dataset, surfaces low-NDCG queries, and establishes metrics you'll reuse when comparing experiments. This notebook provides the performance baseline against which all LLM enhancements will be measured.
 
-   Explores how perfect query categorization could improve search relevance as an upper bound for LLM-driven improvements.
+8. **`2b_Cheat_at_Search_with_LLMs_Perfect_Categorization.py` – Perfect categorization (oracle)**
 
-3. **`2c_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified.py` – Fully qualified categories**
+   Explores how perfect query categorization could improve search relevance as an upper bound for LLM-driven improvements. Uses ground-truth product categories to establish the theoretical maximum gain from categorization-based boosting.
 
-   Implements LLM-based query categorization with fully qualified category paths for more granular understanding.
+**Run Phase 2:**
+```bash
+uv run marimo edit 0_Cheat_at_Search_with_LLMs_Analyze_BM25.py
+uv run marimo edit 2b_Cheat_at_Search_with_LLMs_Perfect_Categorization.py
+```
 
-4. **`2d_cheat_at_search_with_llms_query_categories_list_of_categories.py` – Category lists**
+#### Phase 3: Query Categorization Experiments
 
-   Experiments with returning multiple categories per query to capture query ambiguity and multi-intent searches.
+This phase explores different approaches to LLM-based query categorization. Work through these sequentially to understand the progression from basic to advanced techniques:
+
+9. **`2_Cheat_at_Search_with_LLMs_Query_Categories.py` – Foundation categorization**
+
+   Introduces LLM-based query→category classification using Pydantic `Literal` types to constrain model outputs. Establishes the core category/subcategory boosting strategy and demonstrates structured LLM outputs for search enhancement.
+
+10. **`2a_Cheat_at_Search_with_LLMs_Query_Categories_No_Category_Found.py` – Defensive classification**
+
+    Adds "No Category Fits" and "No SubCategory Fits" options to the categorization system. Explores the precision vs recall tradeoff—avoiding harmful misclassifications is sometimes better than forcing a match. Essential for production systems where false positives degrade user experience.
+
+11. **`2c_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified.py` – Fully qualified categories**
+
+    Implements LLM-based query categorization with fully qualified category paths (e.g., "Furniture > Outdoor > Bistro Sets") for more granular understanding. Uses Pydantic's constrained types to enforce valid category hierarchies and prevent hallucination.
+
+12. **`2d_cheat_at_search_with_llms_query_categories_list_of_categories.py` – Multi-category classification**
+
+    Experiments with returning multiple categories per query to capture query ambiguity and multi-intent searches. Introduces multi-label evaluation using Jaccard similarity to measure overlap between predicted and ground-truth category sets.
+
+13. **`2e_Cheat_at_Search_with_LLMs_Query_Categories_Examples.py` – Few-shot learning**
+
+    Provides domain-specific hints and examples in prompts to improve categorization accuracy. Demonstrates few-shot learning techniques (e.g., "bistro tables are for outdoors") to guide the LLM toward domain-appropriate classifications.
+
+14. **`2f_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified_Hallucinated.py` – Embedding-based resolution**
+
+    Alternative approach: LLM generates plausible (hallucinated) categories, then uses SentenceTransformer embeddings to resolve them to real classifications. More cost-effective (gpt-4o-mini + embedding lookup) than constrained generation for large label sets. Trades constraint enforcement for semantic similarity matching.
+
+**Run Phase 3:**
+```bash
+# Progressive refinements: 2 → 2a → 2c → 2d
+uv run marimo edit 2_Cheat_at_Search_with_LLMs_Query_Categories.py
+uv run marimo edit 2a_Cheat_at_Search_with_LLMs_Query_Categories_No_Category_Found.py
+uv run marimo edit 2c_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified.py
+uv run marimo edit 2d_cheat_at_search_with_llms_query_categories_list_of_categories.py
+
+# Enhanced techniques: examples and embeddings
+uv run marimo edit 2e_Cheat_at_Search_with_LLMs_Query_Categories_Examples.py
+uv run marimo edit 2f_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified_Hallucinated.py
+```
+
+#### Phase 4: Query Understanding & Caching
+
+15. **`2g_Query_to_Query_Similarity.py` – Semantic query similarity**
+
+    Explores using embeddings (`intfloat/e5-small-v2`) for query-to-query similarity to enable semantic caching. Tests threshold-based matching to identify equivalent queries (e.g., "red tennis shoes" ≈ "tennis shoes in red") while avoiding false matches ("red shoes" ≠ "brown shoes"). Demonstrates handling of numerical attributes (sizes) in embedding space.
+
+**Run Phase 4:**
+```bash
+uv run marimo edit 2g_Query_to_Query_Similarity.py
+```
+
+### Key Learning Progressions
+
+- **2 → 2a → 2c → 2d**: Progressive refinements to query categorization—from basic classification to defensive strategies, hierarchical categories, and multi-label outputs
+- **2c vs 2f**: Compare constrained generation (enforced valid categories) vs hallucinated+embedding (semantic resolution)—different tradeoffs in cost, accuracy, and scalability
+- **Baseline → Oracle → Real**: Understand the gap between BM25 baseline (notebook 7), perfect categorization oracle (notebook 8), and achievable LLM improvements (notebooks 9-14)
 
 Running them sequentially gives you the prerequisite context for each successive experiment and mirrors the enablement arc from core lexical control to LLM-assisted ranking tweaks.
 
