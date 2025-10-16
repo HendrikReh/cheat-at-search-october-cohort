@@ -9,6 +9,7 @@ dependencies = [
     "marimo>=0.16.5",
     "pystemmer>=3.0.0",
     "searcharray>=0.0.72",
+    "sentence-transformers>=5.1.1",
     "watchdog>=6.0.0",
 ]
 

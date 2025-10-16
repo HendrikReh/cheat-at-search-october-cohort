@@ -409,7 +409,9 @@ def _(CAT_SEP):
         SentenceTransformer = None
 
     if SentenceTransformer is not None:
-        model = SentenceTransformer('all-MiniLM-L6-v2')
+        model_id = "sentence-transformers/all-MiniLM-L6-v2"
+        print(f"Using SentenceTransformer resolver: {model_id}")
+        model = SentenceTransformer(model_id)
         real_classifications = model.encode(classifications_list)
 
         def resolve_classification(text, used):
@@ -423,7 +425,7 @@ def _(CAT_SEP):
     else:
         from difflib import SequenceMatcher
 
-        print("sentence_transformers not available; using difflib for classification resolution.")
+        print("Using difflib.SequenceMatcher resolver (install `uv add sentence-transformers` for MiniLM embeddings).")
 
         def resolve_classification(text, used):
             scores = sorted(
@@ -447,6 +449,7 @@ def _(mo):
     ### Structured types
 
     * Returns a `hallucinated_classification` that we turn into a real classification via finding the most similar embedding
+    * Automatically reports whether we are using the MiniLM embedding resolver or a difflib fallback (used when `sentence-transformers` is not installed). MiniLM (`uv add sentence-transformers`) gives semantically-aware matches; the fallback relies on character similarity and is slower / less precise but keeps the notebook runnable without extra deps.
     """
     )
     return
@@ -764,16 +767,15 @@ def _(fully_classified, np, products):
 
         def __init__(self, products, query_to_cat, name_boost=9.3, description_boost=4.1, category_boost=10, sub_category_boost=5, cat_subcat_boost=10):
             super().__init__(products)
-            self.index = products
-            self.index['product_name_snowball'] = SearchArray.index(products['product_name'], snowball_tokenizer)
-            self.index['product_description_snowball'] = SearchArray.index(products['product_description'], snowball_tokenizer)
-            cat_split = products['category hierarchy'].fillna('').str.split('/')
-            products['category'] = cat_split.apply(lambda x: x[0].strip() if len(x) > 0 else '')
-            products['subcategory'] = cat_split.apply(lambda x: x[1].strip() if len(x) > 1 else '')
-            self.index['category_snowball'] = SearchArray.index(products['category'], snowball_tokenizer)
-            self.index['subcategory_snowball'] = SearchArray.index(products['subcategory'], snowball_tokenizer)
-            self.index['cat_subcat'] = products['category'] + products['subcategory']
-            self.index['cat_subcat'] = self.index['cat_subcat'].fillna('')
+            self.index = products.copy()
+            self.index['product_name_snowball'] = SearchArray.index(self.index['product_name'], snowball_tokenizer)
+            self.index['product_description_snowball'] = SearchArray.index(self.index['product_description'], snowball_tokenizer)
+            cat_split = self.index['category hierarchy'].fillna('').str.split('/')
+            self.index['category'] = cat_split.apply(lambda x: x[0].strip() if len(x) > 0 else '')
+            self.index['subcategory'] = cat_split.apply(lambda x: x[1].strip() if len(x) > 1 else '')
+            self.index['category_snowball'] = SearchArray.index(self.index['category'], snowball_tokenizer)
+            self.index['subcategory_snowball'] = SearchArray.index(self.index['subcategory'], snowball_tokenizer)
+            self.index['cat_subcat'] = (self.index['category'] + self.index['subcategory']).fillna('')
             self.index['cat_subcat_snowball'] = SearchArray.index(self.index['cat_subcat'], snowball_tokenizer)
             self.query_to_cat = query_to_cat
             self.name_boost = name_boost

@@ -159,6 +159,8 @@ This phase explores different approaches to LLM-based query categorization. Work
 
     Alternative approach: LLM generates plausible (hallucinated) categories, then uses SentenceTransformer embeddings to resolve them to real classifications. More cost-effective (gpt-4o-mini + embedding lookup) than constrained generation for large label sets. Trades constraint enforcement for semantic similarity matching.
 
+    _Optional dependency:_ install `sentence-transformers` (for example, `uv add sentence-transformers`) to enable the fast MiniLM embedding resolver. Without it the notebook automatically falls back to a difflib-based string matcher, which works but is slower and less accurate.
+
 **Run Phase 3:**
 ```bash
 # Progressive refinements: 2 → 2a → 2c → 2d
@@ -278,6 +280,14 @@ Marimo better matches this project’s focus on experimentation:
 ```bash
 # Validate notebook syntax
 uv run python -m compileall notebooks/
+# Or target a single notebook (useful after edits)
+uv run python -m compileall notebooks/2f_Cheat_at_Search_with_LLMs_Query_Categories_Fully_Qualified_Hallucinated.py
+
+# Why this works:
+# - `uv run` launches the project’s managed Python environment, so imports
+#   resolve exactly as they do during normal execution.
+# - `python -m compileall` walks the file(s), compiling them to bytecode.
+#   This surfaces syntax or import errors quickly without running any cells.
 
 # Execute a notebook headlessly
 uv run notebooks/0_Cheat_at_Search_with_LLMs_Analyze_BM25.py
