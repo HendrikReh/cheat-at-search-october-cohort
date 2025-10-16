@@ -836,7 +836,15 @@ def _(categorized_search, products):
 @app.cell
 def _(categorized_search, run_strategy):
     graded_fully_classified = run_strategy(categorized_search)
-    graded_fully_classified
+    display_cols = graded_fully_classified.drop(
+        columns=[
+            col
+            for col in graded_fully_classified.columns
+            if not isinstance(col, str) or col.endswith("_snowball")
+        ],
+        errors="ignore",
+    )
+    display_cols
     return (graded_fully_classified,)
 
 
@@ -914,7 +922,9 @@ def _(QUERY, graded_bm25):
 
 @app.cell
 def _(graded_bm25):
-    graded_bm25.iloc[3103]
+    row = graded_bm25.iloc[3103]
+    sanitized = row[[col for col in ['product_name', 'category hierarchy', 'grade', 'score'] if col in row.index]]
+    sanitized
     return
 
 
